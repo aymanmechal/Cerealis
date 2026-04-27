@@ -460,6 +460,24 @@ def add_month_data(
 def provide_data(months: int = 120):
     try:
         data = Get_prediction_datas(months)
+
+        conn = sqlite3.connect('database.db')
+        env_df = pd.read_sql_query(
+            """SELECT Prix_Petrole, Valeur_Euro, Inflation, Temperature
+               FROM prix_agricoles ORDER BY Annee DESC, Mois DESC LIMIT 1""",
+            conn
+        )
+        conn.close()
+
+        if not env_df.empty:
+            row = env_df.iloc[0]
+            data["market_stats"] = {
+                "Prix_Petrole": round(float(row["Prix_Petrole"]), 2),
+                "Valeur_Euro":  round(float(row["Valeur_Euro"]),  4),
+                "Inflation":    round(float(row["Inflation"]),    1),
+                "Temperature":  round(float(row["Temperature"]),  1),
+            }
+
         return data
     except Exception as e:
         return {"status": "error", "message": str(e)}
