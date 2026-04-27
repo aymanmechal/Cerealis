@@ -1,3 +1,4 @@
+#Importation des bibliothèques
 import sqlite3
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+#Pour intialiser la base de données (fichier database.db)
 def DB_init():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -46,6 +48,7 @@ def DB_init():
     conn.close()
     print("Base de données et table créées avec succès !")
 
+#Permet d'importer les données contenues dans le fichier.csv jusqu'à la base de données
 def import_datas_from_csv(nom_fichier_csv='agricol_datas.csv', nom_fichier_db='database.db'):
     conn = sqlite3.connect(nom_fichier_db)
     
@@ -53,20 +56,19 @@ def import_datas_from_csv(nom_fichier_csv='agricol_datas.csv', nom_fichier_db='d
         # Lecture du CSV
         df = pd.read_csv(nom_fichier_csv, sep=';', decimal=',', encoding='utf-8-sig')
 
-        # REMPLACEMENT CRITIQUE : 'replace' au lieu de 'append'
-        # Cela vide la table avant d'insérer, garantissant 0 doublon.
         df.to_sql('prix_agricoles', conn, if_exists='replace', index=False)
 
         conn.commit()
         print(f"Synchronisation réussie : {len(df)} lignes uniques importées.")
 
+    #Si le fichier est introuvable, on affiche une erreur personnalisée
     except FileNotFoundError:
         print(f"Erreur : fichier '{nom_fichier_csv}' introuvable.")
     except Exception as e:
         print(f"Erreur lors de l'import : {e}")
     finally:
         conn.close()
-
+#Pour afficher les données de la base de données de façon esthétique
 def Show_database(nom_fichier_db='database.db'):
     # 1. Connexion à la base
     conn = sqlite3.connect(nom_fichier_db)
@@ -88,28 +90,30 @@ def Show_database(nom_fichier_db='database.db'):
             # .head(30) permet d'afficher les 30 premières lignes
             # .round(3) applique ta limite de 3 chiffres après la virgule
             print(df.head(30).round(3))
-            
+    # Gestion des erreurs  
     except Exception as e:
         print(f"Erreur lors de l'affichage : {e}")
     finally:
         # 5. Fermeture de la connexion
         conn.close()
 
+# Permet de prédire les données d'un éléménet agricol donné (tout sauf les produits eux-mêmes)
 def predict_future_environnemment_datas(element: str, nbr_months: int):
     conn = sqlite3.connect('database.db')
     query = f"SELECT Annee, Mois, {element} FROM prix_agricoles ORDER BY Annee, Mois"
+    #On initialise le dataframe
     df = pd.read_sql_query(query, conn)
     conn.close()
 
+    #Si le dataframe est vide, on quitte la fonction
     if df.empty:
         return None
 
-    # 1. Préparation avec Mois (Saison) et Time_Index (Tendance)
+    # Initialisation des variables X et Y
     df['Time_Index'] = np.arange(len(df)) 
     X = df[['Mois', 'Time_Index']].values
     Y = df[element].values
 
-    # 2. Préparation du futur (strictement déterministe)
     last_month = df['Mois'].iloc[-1]
     last_time = df['Time_Index'].iloc[-1]
     
@@ -117,6 +121,7 @@ def predict_future_environnemment_datas(element: str, nbr_months: int):
     current_month = last_month
     current_time = last_time
     
+    # On va créer une instance pour les futurs mois
     for _ in range(nbr_months):
         current_month = 1 if current_month >= 12 else current_month + 1
         current_time += 1
@@ -124,37 +129,43 @@ def predict_future_environnemment_datas(element: str, nbr_months: int):
     
     future_X = np.array(future_X)
 
-    # 3. On privilégie la Polynomiale pour l'évolution temporelle
+    # 3. On privilégie la Polynomiale pour les estimarions
     # Même si le Random Forest a un meilleur R² sur le passé, 
-    # la Polynomiale est plus "honnête" pour l'extrapolation future.
+    # la Polynomiale est plus efficace pour l'extrapolation future.
     poly_feat = PolynomialFeatures(degree=2)
     X_poly = poly_feat.fit_transform(X)
     model_poly = LinearRegression()
     model_poly.fit(X_poly, Y)
 
-    # 4. Calcul des prédictions (Sans ajout de bruit)
+    # 4. Calcul des prédictions
     future_X_poly = poly_feat.transform(future_X)
     future_preds = model_poly.predict(future_X_poly)
 
     return np.round(future_preds, 2)
 
+#Permet d'exporter les données de la base de données dans le fichier.csv (backup)
 def export_to_csv(nom_fichier_csv='export_prix_agricoles.csv', nom_fichier_db='database.db'):
     conn = sqlite3.connect(nom_fichier_db)
     
     try:
+        #initialisation de df et récupération des données de la base de données
         df = pd.read_sql_query("SELECT * FROM prix_agricoles ORDER BY Annee, Mois", conn)
         
+        #Si df ne contient aucune données --> la table prix_agricoles de la base de données est vide
         if df.empty:
             print("La base de données est vide, rien à exporter.")
             return
         
+        #On exporte les donnés dans le fichier.csv
         df.to_csv(nom_fichier_csv, index=False, sep=';', decimal=',', encoding='utf-8-sig')
         print(f"Export réussi : {len(df)} lignes exportées dans '{nom_fichier_csv}'")
-        
+    
+    #Gestion des erreurs
     except Exception as e:
         print(f"Erreur lors de l'export : {e}")
     finally:
         conn.close()
+
 
 def fetch_new_month_data() -> dict | None:
     now = datetime.now()
@@ -167,9 +178,9 @@ def fetch_new_month_data() -> dict | None:
 
     print(f"[Scheduler] Récupération des données pour {annee_cible}-{mois_cible:02d}...")
 
-    # 👉 TON APPEL API ICI — en attendant :
     return None
 
+# Fonction que l'on va appeler pour insérer des nouvelles données dans la base de données puis dans le ficher .csv
 def insert_new_month_row(data: dict, nom_fichier_db='database.db'):
     """Insère une ligne dans la DB si elle n'existe pas déjà."""
     conn = sqlite3.connect(nom_fichier_db)
@@ -191,7 +202,7 @@ def insert_new_month_row(data: dict, nom_fichier_db='database.db'):
             list(data.values())
         )
         conn.commit()
-        print(f"[Scheduler] ✅ Ligne {data['Annee']}-{data['Mois']:02d} insérée avec succès.")
+        print(f"[Scheduler]  Ligne {data['Annee']}-{data['Mois']:02d} insérée avec succès.")
         return True
     except Exception as e:
         print(f"[Scheduler] Erreur insertion : {e}")
@@ -206,7 +217,7 @@ async def monthly_data_refresh():
     2. Les insère en base
     3. Met à jour le CSV source
     """
-    print(f"\n[Scheduler] 🕕 Tâche mensuelle déclenchée le {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"\n[Scheduler]  Tâche mensuelle déclenchée le {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     
     new_data = fetch_new_month_data()
     
@@ -219,7 +230,7 @@ async def monthly_data_refresh():
     if inserted:
         # On réécrit le CSV pour qu'il reste synchronisé avec la DB
         export_to_csv('Server/agricol_datas.csv')
-        print("[Scheduler] 🔄 CSV mis à jour.")
+        print("[Scheduler] CSV mis à jour.")
     
     print("[Scheduler] Tâche mensuelle terminée.\n")
 
@@ -270,7 +281,9 @@ def predict_future_product_datas(environnement_datas_predictions, product_to_pre
 
     return np.round(predictions, 2)
 
+# Pour récupérer l'ensemble des données de l'environnement
 def Get_predictions_all_product_datas (number_of_months=120):
+    #On va récupérer les données prévisionnelles de l'environnement 
     Temperature_prediction = predict_future_environnemment_datas("Temperature",number_of_months)
     Pression_prediction = predict_future_environnemment_datas("Pression",number_of_months)
     Pluviometrie_prediction = predict_future_environnemment_datas("Pluviometrie",number_of_months)
@@ -281,6 +294,7 @@ def Get_predictions_all_product_datas (number_of_months=120):
     Prix_Gaz_prediction = predict_future_environnemment_datas("Prix_Gaz",number_of_months)
     Prix_Electricite_prediction = predict_future_environnemment_datas("Prix_Electricite",number_of_months)
 
+    # Mise en forme de ces données sous la forme d'un dictionnaire (clé: liste de valeurs)
     Environnement_datas_predictions=[Temperature_prediction,Pression_prediction,Pluviometrie_prediction,Prix_Petrole_prediction ,Valeur_Euro_prediction ,Inflation_prediction,Prix_Eau_prediction ,Prix_Gaz_prediction ,Prix_Electricite_prediction]
 
     produits = ["Prix_Ble", "Prix_Mais", "Prix_Orge", "Prix_Sarrasin", 
@@ -292,8 +306,8 @@ def Get_predictions_all_product_datas (number_of_months=120):
     }
     return predictions_produits
 
+#Pour récupérer les prédictions
 def Get_prediction_datas(Predictions_duree=120):
-    
     # 1. Récupérer toutes les données historiques de la base
     conn = sqlite3.connect('database.db')
     query = """
@@ -340,9 +354,11 @@ def Get_prediction_datas(Predictions_duree=120):
         }
     return result
 
-
+#################
+#------Main-----#
+#################
+#initialisation de la fastAPI
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -352,18 +368,22 @@ app.add_middleware(
 
 scheduler = AsyncIOScheduler()
 
+#Création des différentes routes de la FastAPI
+
 @app.on_event("startup")
 async def startup_event():
+    #initialisation de la bese de données 
     print("Initialisation de la base de données...")
     DB_init()
 
-    # Vérification : la DB est-elle déjà peuplée ?
+    # Vérification pour savoir si la DB est déjà peuplée 
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM prix_agricoles")
     row_count = cursor.fetchone()[0]
     conn.close()
 
+    #Si la base de données est vide, on importe les données de notre backup (fichier.csv)
     if row_count == 0:
         print("Base de données vide — chargement depuis le CSV de backup...")
         import_datas_from_csv('Server/agricol_datas.csv')
@@ -373,7 +393,7 @@ async def startup_event():
 
     print("Base de données prête !")
 
-    # ✅ Lancement du scheduler : exécution le 1er de chaque mois à 06h00
+    # Lancement du scheduler : exécution le 1er de chaque mois à 06h00
     scheduler.add_job(
         monthly_data_refresh,
         trigger=CronTrigger(day=1, hour=6, minute=0),
@@ -381,7 +401,7 @@ async def startup_event():
         replace_existing=True,
     )
     scheduler.start()
-    print("[Scheduler] ✅ Planificateur démarré — tâche prévue le 1er de chaque mois à 06h00.")
+    print("[Scheduler] Planificateur démarré — tâche prévue le 1er de chaque mois à 06h00.")
 
 
 @app.on_event("shutdown")
@@ -390,14 +410,15 @@ async def shutdown_event():
     print("[Scheduler] Planificateur arrêté.")
 
 
-# ✅ BONUS : Route manuelle pour déclencher la tâche sans attendre
+# Route manuelle pour déclencher la tâche
 @app.post("/api/refresh")
 async def manual_refresh():
-    """Permet de déclencher la mise à jour manuellement (utile pour les tests)."""
+    """Permet de déclencher la mise à jour manuellement (pour les tests)."""
     await monthly_data_refresh()
     return {"status": "ok", "message": "Mise à jour manuelle effectuée."}
 
 @app.post("/api/add_month")
+#Nouvelle route pour ajouter des données
 def add_month_data(
     Annee: int,
     Mois: int,
@@ -458,6 +479,7 @@ def add_month_data(
 
 @app.get("/api/data")
 def provide_data(months: int = 120):
+    #Pour récupérer les données de la base de données et celles de prédiction
     try:
         data = Get_prediction_datas(months)
         return data

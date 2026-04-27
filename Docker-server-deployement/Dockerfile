@@ -7,16 +7,16 @@ ENV PYTHONUNBUFFERED 1
 
 WORKDIR /app
 
-# Installation des dépendances
+# Installation des dépendances inscrites dans le fichier requirement.txt
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copie de tout le projet (incluant le dossier Server/ et ses fichiers)
+
 COPY . .
 
-# On expose le port 8000
+# On rend notre conteneur accessuble depuis le port 8000
 EXPOSE 8000
 
-# On lance Uvicorn en pointant vers le fichier Server.py dans le dossier Server
+# On lance Uvicorn en pointant vers le fichier Server.py dans le dossier Server (script qui utiliser FastAPI)
 # Format: dossier.fichier:variable_fastapi
 CMD ["uvicorn", "Server.Server:app", "--host", "0.0.0.0", "--port", "8000"]
