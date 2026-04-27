@@ -1,0 +1,51 @@
+Lancement du serveur avec Docker
+Lancer le conteneur
+docker run -p 8000:8000 mon-api-agricole
+Construire l’image Docker
+docker build -t mon-api-agricole .
+Supprimer tous les conteneurs
+docker rm -f $(docker ps -aq)
+Ajout de nouvelles données mensuelles
+
+Chaque mois, de nouvelles données peuvent être ajoutées via l’API.
+
+Lancer le script Server.py (soit directement depuis le terminal, soit via Docker).
+Ouvrir un navigateur et accéder à l’URL suivante :
+http://localhost:8000/docs
+Dans l’interface, sélectionner l’endpoint POST /api/add_month.
+Cliquer sur "Try it out".
+Renseigner les 18 champs demandés (Année, Mois, Prix_Blé, etc.).
+Cliquer sur "Execute" pour envoyer les données.
+Consultation des données
+
+Pour afficher les données historiques ainsi que les prédictions :
+
+Accéder à l’URL suivante dans le navigateur :
+http://localhost:8000/api/data?months=120
+
+Une réponse au format JSON sera retournée, contenant les données passées et les prévisions.
+
+Informations sur les données
+Les données correspondent à des moyennes mensuelles en France.
+Les mois sont exprimés sous forme numérique (janvier = 1, février = 2, etc.).
+La pression atmosphérique est exprimée en hectopascals (hPa).
+La pluviométrie est exprimée en millimètres (mm).
+Le prix du baril de pétrole est en dollars américains ($).
+Le taux de change correspond à la conversion euro / dollar (EUR/USD).
+Le taux d’inflation est exprimé en pourcentage (%) d’évolution annuelle.
+Données suivies
+
+Le projet inclut notamment des séries historiques (1996–2025) pour les indicateurs suivants :
+
+Prix de l’eau (€/m³)
+Prix du gaz naturel (€/MWh)
+Prix de l’électricité (€/MWh)
+Prix du blé tendre (€/t)
+Prix du maïs (€/t)
+Prix de l’orge (€/t)
+Prix du sarrasin (€/t)
+Prix du seigle (€/t)
+Prix des graines de tournesol (€/t)
+Prix des graines de moutarde (€/t)
+
+Ces données sont utilisées pour alimenter les analyses et générer des prédictions.
