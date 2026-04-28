@@ -1,4 +1,6 @@
-const BASE_URL = 'http://localhost:8000'
+// Détecte automatiquement l'adresse du serveur backend
+const BASE_URL = import.meta.env.VITE_API_URL || 
+                 `http://${window.location.hostname}:8000`
 
 // Holds the last successful API response so the UI stays populated if the
 // backend goes down between refreshes.
