@@ -5,7 +5,6 @@ import pandas as pd
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from datetime import datetime
 
 #Pour la régression: 
 from sklearn.linear_model import LinearRegression, Ridge
@@ -13,14 +12,15 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import r2_score
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 #Pour intialiser la base de données (fichier database.db)
 def DB_init():
+    # Ouvre (ou crée si inexistant) le fichier de base de données SQLite
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
 
+    # CREATE TABLE IF NOT EXISTS : crée la table uniquement si elle n'existe pas déjà,
+    # ce qui évite d'écraser les données à chaque démarrage
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS prix_agricoles (
         Annee INTEGER,
@@ -56,6 +56,8 @@ def import_datas_from_csv(nom_fichier_csv='agricol_datas.csv', nom_fichier_db='d
         # Lecture du CSV
         df = pd.read_csv(nom_fichier_csv, sep=';', decimal=',', encoding='utf-8-sig')
 
+        # if_exists='replace' : supprime et recrée la table si elle existe déjà,
+        # ce qui garantit que le CSV est toujours la source de vérité lors d'un import
         df.to_sql('prix_agricoles', conn, if_exists='replace', index=False)
 
         conn.commit()
@@ -110,6 +112,8 @@ def predict_future_environnemment_datas(element: str, nbr_months: int):
         return None
 
     # Initialisation des variables X et Y
+    # np.arange(len(df)) génère une suite 0, 1, 2, ... qui représente chaque mois
+    # de façon linéaire, ce qui aide le modèle à détecter la tendance dans le temps
     df['Time_Index'] = np.arange(len(df)) 
     X = df[['Mois', 'Time_Index']].values
     Y = df[element].values
@@ -123,6 +127,7 @@ def predict_future_environnemment_datas(element: str, nbr_months: int):
     
     # On va créer une instance pour les futurs mois
     for _ in range(nbr_months):
+        # Remise à 1 en janvier après décembre (cycle mensuel)
         current_month = 1 if current_month >= 12 else current_month + 1
         current_time += 1
         future_X.append([current_month, current_time])
@@ -133,11 +138,13 @@ def predict_future_environnemment_datas(element: str, nbr_months: int):
     # Même si le Random Forest a un meilleur R² sur le passé, 
     # la Polynomiale est plus efficace pour l'extrapolation future.
     poly_feat = PolynomialFeatures(degree=2)
+    # fit_transform : calcule les coefficients du modèle polynomial puis transforme X
     X_poly = poly_feat.fit_transform(X)
     model_poly = LinearRegression()
     model_poly.fit(X_poly, Y)
 
     # 4. Calcul des prédictions
+    # On utilise transform (sans fit) car les coefficients sont déjà calculés sur X historique
     future_X_poly = poly_feat.transform(future_X)
     future_preds = model_poly.predict(future_X_poly)
 
@@ -167,19 +174,6 @@ def export_to_csv(nom_fichier_csv='export_prix_agricoles.csv', nom_fichier_db='d
         conn.close()
 
 
-def fetch_new_month_data() -> dict | None:
-    now = datetime.now()
-    if now.month == 1:
-        mois_cible  = 12
-        annee_cible = now.year - 1
-    else:
-        mois_cible  = now.month - 1
-        annee_cible = now.year
-
-    print(f"[Scheduler] Récupération des données pour {annee_cible}-{mois_cible:02d}...")
-
-    return None
-
 # Fonction que l'on va appeler pour insérer des nouvelles données dans la base de données puis dans le ficher .csv
 def insert_new_month_row(data: dict, nom_fichier_db='database.db'):
     """Insère une ligne dans la DB si elle n'existe pas déjà."""
@@ -191,10 +185,13 @@ def insert_new_month_row(data: dict, nom_fichier_db='database.db'):
             "SELECT COUNT(*) FROM prix_agricoles WHERE Annee=? AND Mois=?",
             (data["Annee"], data["Mois"])
         )
+        # fetchone()[0] récupère la première colonne de la première ligne retournée,
+        # soit ici le nombre de lignes correspondantes
         if cursor.fetchone()[0] > 0:
             print(f"[Scheduler] Données {data['Annee']}-{data['Mois']:02d} déjà présentes, insertion ignorée.")
             return False
 
+        # Construction dynamique de la requête INSERT à partir des clés du dictionnaire
         colonnes = ", ".join(data.keys())
         placeholders = ", ".join(["?"] * len(data))
         cursor.execute(
@@ -210,29 +207,6 @@ def insert_new_month_row(data: dict, nom_fichier_db='database.db'):
     finally:
         conn.close()
 
-async def monthly_data_refresh():
-    """
-    Exécutée automatiquement le 1er de chaque mois.
-    1. Récupère les données du mois écoulé
-    2. Les insère en base
-    3. Met à jour le CSV source
-    """
-    print(f"\n[Scheduler]  Tâche mensuelle déclenchée le {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    
-    new_data = fetch_new_month_data()
-    
-    if new_data is None:
-        print("[Scheduler] Aucune donnée à insérer ce mois-ci.")
-        return
-    
-    inserted = insert_new_month_row(new_data)
-    
-    if inserted:
-        # On réécrit le CSV pour qu'il reste synchronisé avec la DB
-        export_to_csv('Server/agricol_datas.csv')
-        print("[Scheduler] CSV mis à jour.")
-    
-    print("[Scheduler] Tâche mensuelle terminée.\n")
 
 def predict_future_product_datas(environnement_datas_predictions, product_to_predict: str):
     
@@ -266,6 +240,8 @@ def predict_future_product_datas(environnement_datas_predictions, product_to_pre
     meilleur_model = None
     for nom, modele in modeles.items():
         modele.fit(X_hist, Y_hist)
+        # r2_score mesure la qualité du modèle : 1.0 = parfait, 0 = nul
+        # On garde le modèle qui prédit le mieux les données historiques
         score = r2_score(Y_hist, modele.predict(X_hist))
         if score > meilleur_score:
             meilleur_score = score
@@ -274,6 +250,7 @@ def predict_future_product_datas(environnement_datas_predictions, product_to_pre
 
 
     # 4. Construire la matrice des données futures d'environnement
+    # np.column_stack assemble plusieurs tableaux 1D en colonnes d'une matrice 2D
     X_future = np.column_stack(environnement_datas_predictions)
 
     # 5. Prédire avec le meilleur modèle
@@ -300,6 +277,8 @@ def Get_predictions_all_product_datas (number_of_months=120):
     produits = ["Prix_Ble", "Prix_Mais", "Prix_Orge", "Prix_Sarrasin", 
                 "Prix_Seigle", "Prix_Tournesol", "Prix_Moutarde"]
 
+    # Syntaxe de compréhension de dictionnaire : pour chaque produit, on appelle
+    # predict_future_product_datas et on stocke le résultat avec le nom du produit comme clé
     predictions_produits = {
         produit: predict_future_product_datas(Environnement_datas_predictions, produit)
         for produit in produits
@@ -334,19 +313,23 @@ def Get_prediction_datas(Predictions_duree=120):
 
     for _ in range(Predictions_duree):
         mois_courant += 1
+        # Passage à l'année suivante quand on dépasse décembre
         if mois_courant > 12:
             mois_courant   = 1
             annee_courante += 1
+        # :02d formate le mois sur 2 chiffres (ex : "2025-01" au lieu de "2025-1")
         labels_futurs.append(f"{annee_courante}-{mois_courant:02d}")
 
     # 4. Construire le dictionnaire final avec tuples
     result = {}
     for produit in produits:
         result[produit] = {
+            # Construction de la liste des données passées sous forme de tuples (label, valeur)
             "donnees_passees": [
                 (f"{int(row['Annee'])}-{int(row['Mois']):02d}", float(row[produit]))
                 for _, row in df_hist.iterrows()
             ],
+            # zip associe chaque label futur à sa valeur prédite correspondante
             "donnees_predites": [
                 (label, float(valeur))
                 for label, valeur in zip(labels_futurs, predictions_produits[produit])
@@ -365,8 +348,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-scheduler = AsyncIOScheduler()
 
 #Création des différentes routes de la FastAPI
 
@@ -393,21 +374,10 @@ async def startup_event():
 
     print("Base de données prête !")
 
-    # Lancement du scheduler : exécution le 1er de chaque mois à 06h00
-    scheduler.add_job(
-        monthly_data_refresh,
-        trigger=CronTrigger(day=1, hour=6, minute=0),
-        id="monthly_refresh",
-        replace_existing=True,
-    )
-    scheduler.start()
-    print("[Scheduler] Planificateur démarré — tâche prévue le 1er de chaque mois à 06h00.")
-
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    scheduler.shutdown()
-    print("[Scheduler] Planificateur arrêté.")
+    print("Serveur arrêté.")
 
 
 # Route manuelle pour déclencher la tâche
