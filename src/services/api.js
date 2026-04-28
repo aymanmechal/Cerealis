@@ -1,5 +1,7 @@
-const BASE = 'http://localhost:8000'
-let cache = null
+const BASE_URL = import.meta.env.VITE_API_URL || 
+                 `http://${window.location.hostname}:8000`
+
+let _cache = null
 
 export async function fetchData(months = 12) {
   try {
