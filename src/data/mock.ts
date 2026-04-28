@@ -10,10 +10,10 @@ export const CROPS: { name: Crop; emoji: string }[] = [
   { name: "Moutarde", emoji: "🌼" },
 ]
 
-// Only these three are shown in the chip selector; the rest are still fetched from the API
 export const VISIBLE_CROPS: { name: Crop; emoji: string }[] = [
   { name: "Blé",       emoji: "🌾" },
   { name: "Maïs",      emoji: "🌽" },
+  { name: "Orge",      emoji: "🌿" },
   { name: "Tournesol", emoji: "🌻" },
 ]
 
