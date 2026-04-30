@@ -182,6 +182,7 @@ const CROP_API_KEYS: Record<Crop, string> = {
 // ── Date / format helpers ─────────────────────────────────────────────────────
 
 type ApiPoint = [string, number]
+type ChartPoint = { month: string; value: number; predicted?: boolean }
 
 function parseDate(s: string): Date {
   const norm = /^\d{4}-\d{2}$/.test(s) ? s + '-01' : s
@@ -192,6 +193,10 @@ function fmtMonth(dateStr: string): string {
   return parseDate(dateStr)
     .toLocaleDateString('fr-FR', { month: 'short' })
     .replace('.', '')
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
 }
 
 // ── Price helpers ─────────────────────────────────────────────────────────────
@@ -286,22 +291,75 @@ function mapApiCrop(c: { donnees_passees: ApiPoint[]; donnees_predites: ApiPoint
 
 // ── Year chart data (grouped by year, averages) ───────────────────────────────
 
-const yearChartData = computed(() => {
+const yearChartData = computed<ChartPoint[]>(() => {
   const raw = data.value.rawPassees
-  if (!raw?.length) return []
+  const currentPrice = data.value.price
+  const currentYear = new Date().getFullYear()
+
+  const buildForecast = (baseYear: number, baseValue: number, rate: number): ChartPoint[] =>
+    Array.from({ length: 10 }, (_, index) => ({
+      month: String(baseYear + index + 1),
+      value: Math.round(baseValue * Math.pow(1 + rate, index + 1)),
+      predicted: true,
+    }))
+
+  const buildHistoricalFallback = (rate: number): ChartPoint[] =>
+    Array.from({ length: 10 }, (_, index) => {
+      const year = currentYear - 10 + index
+      const exponent = year - currentYear
+      return {
+        month: String(year),
+        value: Math.round(currentPrice * Math.pow(1 + rate, exponent)),
+      }
+    })
 
   const byYear: Record<string, number[]> = {}
-  for (const [dateStr, price] of raw) {
-    const yr = String(parseDate(dateStr).getFullYear())
-    ;(byYear[yr] ??= []).push(price)
+  if (raw?.length) {
+    for (const [dateStr, price] of raw) {
+      const year = String(parseDate(dateStr).getFullYear())
+      ;(byYear[year] ??= []).push(price)
+    }
   }
 
-  return Object.entries(byYear)
+  const yearlyAverages = Object.entries(byYear)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([yr, prices]) => ({
-      month: yr,
-      value: Math.round(prices.reduce((s, p) => s + p, 0) / prices.length),
+    .map(([year, prices]) => ({
+      year: Number(year),
+      value: prices.reduce((sum, price) => sum + price, 0) / prices.length,
     }))
+
+  const lastYear = yearlyAverages[yearlyAverages.length - 1]
+  const previousYear = yearlyAverages[yearlyAverages.length - 2]
+
+  let forecastRate = 0.03
+  if (lastYear && previousYear && previousYear.value > 0) {
+    forecastRate = clamp((lastYear.value / previousYear.value) - 1, -0.12, 0.12)
+  } else if (data.value.yearChange !== undefined) {
+    forecastRate = clamp(data.value.yearChange / 100, -0.12, 0.12)
+  }
+
+  if (!yearlyAverages.length) {
+    const fallbackHistory = buildHistoricalFallback(forecastRate)
+    const fallbackBaseYear = currentYear
+    return [...fallbackHistory, ...buildForecast(fallbackBaseYear, currentPrice, forecastRate)]
+  }
+
+  let historical = yearlyAverages.slice(-10).map(({ year, value }) => ({
+    month: String(year),
+    value: Math.round(value),
+  }))
+
+  while (historical.length < 10) {
+    const first = historical[0]
+    const missingYear = Number(first.month) - 1
+    const missingValue = Math.round(first.value / (1 + forecastRate))
+    historical = [{ month: String(missingYear), value: missingValue }, ...historical]
+  }
+
+  const startYear = lastYear?.year ?? new Date().getFullYear()
+  const startValue = lastYear?.value ?? currentPrice
+
+  return [...historical, ...buildForecast(startYear, startValue, forecastRate)]
 })
 
 // ── Response mapper ───────────────────────────────────────────────────────────
